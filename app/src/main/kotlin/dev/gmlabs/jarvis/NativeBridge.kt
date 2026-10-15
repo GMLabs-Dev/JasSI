@@ -8,7 +8,10 @@ object NativeBridge {
         runCatching { System.loadLibrary("jarvis_native") }
     }
 
-    external fun backendName(): String
+    private external fun backendName(): String
+
+    fun backendDescription(): String =
+        runCatching { backendName() }.getOrElse { "CPU fallback (native backend unavailable)" }
 
     fun generate(modelPath: String, prompt: String): String? {
         if (modelPath.endsWith(".safetensors", true)) {
@@ -33,4 +36,9 @@ object NativeBridge {
     }
 
     private external fun nativeGenerate(modelPath: String, prompt: String): String
+    private external fun nativeTranscribe(modelPath: String, samples: FloatArray): String
+
+    fun transcribe(modelPath: String, samples: FloatArray): String =
+        runCatching { nativeTranscribe(modelPath, samples) }
+            .getOrElse { "Whisper transcription failed: ${it.message ?: "native error"}" }
 }

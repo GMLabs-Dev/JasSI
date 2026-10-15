@@ -1,6 +1,5 @@
 package dev.gmlabs.jarvis
 
-import android.os.Build
 import android.os.StatFs
 import android.content.Context
 import kotlin.math.roundToInt
@@ -24,12 +23,12 @@ data class LocalModel(
 data class DeviceProfile(
     val memoryGb: Float,
     val cores: Int,
-    val hasNeuralApi: Boolean,
+    val hasHexagon: Boolean,
     val hasGpu: Boolean
 ) {
     val summary: String
         get() = "${memoryGb.roundToInt()} GB RAM · $cores CPU cores · " +
-            if (hasNeuralApi) "NPU available" else "CPU/GPU inference"
+            if (hasHexagon) "Hexagon backend available" else "CPU/GPU inference"
 }
 
 object ModelCatalog {
@@ -78,7 +77,7 @@ object ModelCatalog {
         return DeviceProfile(
             memoryGb = ramGb,
             cores = Runtime.getRuntime().availableProcessors(),
-            hasNeuralApi = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q,
+            hasHexagon = NativeBridge.backendDescription().contains("hexagon", ignoreCase = true),
             hasGpu = true
         )
     }

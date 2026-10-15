@@ -5,6 +5,10 @@ import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -14,10 +18,13 @@ import android.speech.SpeechRecognizer
 import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
+import android.view.Gravity
+import android.view.Window
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.Switch
@@ -26,9 +33,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import java.util.Locale
+import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
+    companion object {
+        const val EXTRA_ASSISTANT_OVERLAY = "assistant_overlay"
+    }
+
     private lateinit var output: TextView
     private lateinit var modelSummary: TextView
     private lateinit var t2Endpoint: EditText
@@ -44,7 +58,11 @@ class MainActivity : AppCompatActivity() {
     private var ttsEnabled = true
     private var speechRecognizer: SpeechRecognizer? = null
     private val worker = Executors.newSingleThreadExecutor()
+    private val requestInProgress = AtomicBoolean(false)
     private var pendingVoiceStart = false
+    private var whisperModelPath: String? = null
+    private var overlayMode = false
+    private var thinkingIndicator: ProgressBar? = null
 
     private val assistantRole =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
@@ -74,13 +92,66 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = JarvisPreferences(this)
+        overlayMode = intent.getBooleanExtra(EXTRA_ASSISTANT_OVERLAY, false)
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) tts?.language = Locale.getDefault()
         }
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-        setContentView(buildScreen())
+        whisperModelPath = ensureWhisperModel()
+        if (overlayMode) {
+            configureAssistantWindow()
+            setContentView(buildAssistantOverlay())
+        } else {
+            setContentView(buildScreen())
+        }
         maybeRequestMicrophone()
         maybeRequestCamera()
+        if (overlayMode) window.decorView.post { transcribeWithWhisper() }
+    }
+
+    private fun configureAssistantWindow() {
+        window.setBackgroundDrawableResource(android.R.color.transparent)
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        window.attributes = window.attributes.apply {
+            gravity = Gravity.BOTTOM
+            width = ViewGroup.LayoutParams.MATCH_PARENT
+            height = ViewGroup.LayoutParams.WRAP_CONTENT
+            dimAmount = 0.35f
+        }
+    }
+
+    private fun buildAssistantOverlay(): View {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(18), dp(22), dp(20))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.rgb(30, 51, 83), Color.rgb(12, 22, 39))
+            ).apply {
+                cornerRadii = floatArrayOf(
+                    dp(24).toFloat(), dp(24).toFloat(), dp(24).toFloat(), dp(24).toFloat(),
+                    0f, 0f, 0f, 0f
+                )
+            }
+        }
+        panel.addView(label("JasSI", 22, Color.WHITE))
+        panel.addView(label("Ask anything", 13, Color.LTGRAY))
+        output = label("Listening...", 17, Color.WHITE).apply {
+            setPadding(0, dp(14), 0, dp(10))
+        }
+        panel.addView(output)
+        thinkingIndicator = ProgressBar(this).apply {
+            visibility = View.GONE
+            isIndeterminate = true
+        }
+        panel.addView(thinkingIndicator, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, dp(28)
+        ).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        val close = button("Close") { finish() }
+        panel.addView(close, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(48)
+        ))
+        return panel
     }
 
     private fun buildScreen(): View {
@@ -102,6 +173,13 @@ class MainActivity : AppCompatActivity() {
         content.addView(label("Choose how JasSI thinks. Faster tiers are always tried first.", 15, Color.LTGRAY))
         content.addView(space(18))
         content.addView(card("Device profile", "${device.summary}\nRecommended: ${recommendation.name}"))
+        content.addView(card("Native backend", NativeBridge.backendDescription() +
+            "\nHexagon is used only in builds made with Qualcomm's Hexagon SDK; otherwise JasSI uses the CPU fallback."))
+        output = label("JasSI is ready. Try “open Waterfox” or “explain this error”.", 15, Color.WHITE).apply {
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            setBackgroundColor(Color.rgb(28, 41, 65))
+        }
+        content.addView(output)
 
         content.addView(label("On-device model · T1", 19, Color.WHITE))
         content.addView(label("Select a Hugging Face model. JasSI recommends a size your phone can run comfortably.", 14, Color.LTGRAY))
@@ -196,6 +274,31 @@ class MainActivity : AppCompatActivity() {
             prefs.t2ApiKey = t2ApiKey.text.toString()
             output.text = if (prefs.t2Endpoint.isBlank()) "T2 disabled." else "T2 enabled for ${prefs.t2Endpoint}."
         })
+        content.addView(button("Test T2 connection and list models") {
+            prefs.t2Endpoint = t2Endpoint.text.toString().trim()
+            prefs.t2Model = t2Model.text.toString().trim()
+            prefs.t2ApiKey = t2ApiKey.text.toString()
+            if (prefs.t2Endpoint.isBlank()) {
+                output.text = "Enter the computer's LAN address first. Do not use localhost from the phone."
+            } else if (prefs.t2Endpoint.contains("localhost", ignoreCase = true) ||
+                prefs.t2Endpoint.contains("127.0.0.1")) {
+                output.text = "A phone cannot reach the computer through localhost. Replace it with the computer's LAN IP address."
+            } else {
+                output.text = "Testing ${prefs.t2Provider}..."
+                worker.execute {
+                    val message = runCatching {
+                        ProviderDiscovery.local(prefs.t2Provider, prefs.t2Endpoint, prefs.t2ApiKey)
+                    }.getOrElse { "T2 test failed: ${it.message ?: "connection failed"}" }
+                    runOnUiThread { output.text = message }
+                }
+            }
+        })
+        content.addView(label(
+            "Ollama: use the computer's address and port 11434. LM Studio: enable Developer > Start server, " +
+                "allow network access, and use port 1234. JasSI discovers the model IDs for you.",
+            13,
+            Color.LTGRAY
+        ))
 
         content.addView(label("Optional online model · T3", 19, Color.WHITE))
         t3Switch = Switch(this).apply {
@@ -238,6 +341,17 @@ class MainActivity : AppCompatActivity() {
             saveCurrentApiKey(apiKey.text.toString())
             output.text = "Saved ${prefs.t3Provider} settings on this device."
         })
+        content.addView(button("Check cloud API key") {
+            prefs.t3Model = t3Model.text.toString().trim()
+            saveCurrentApiKey(apiKey.text.toString())
+            output.text = "Checking ${prefs.t3Provider}..."
+            worker.execute {
+                val message = runCatching {
+                    ProviderDiscovery.cloud(prefs.t3Provider, currentApiKey())
+                }.getOrElse { "T3 check failed: ${it.message ?: "request failed"}" }
+                runOnUiThread { output.text = message }
+            }
+        })
         content.addView(label("Cloud calls go directly from JasSI to the selected provider. No gateway is required. " +
             "Privacy mode blocks them.", 13, Color.LTGRAY))
 
@@ -277,11 +391,13 @@ class MainActivity : AppCompatActivity() {
         }
         val send = button("Send") { handle(input.text.toString(), false) }
         val voice = button("Voice") { listen() }
+        val offlineVoice = button("Offline Whisper") { transcribeWithWhisper() }
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             addView(input, LinearLayout.LayoutParams(0, dp(54), 1f))
             addView(send)
             addView(voice)
+            addView(offlineVoice)
         }
         content.addView(space(14))
         content.addView(controls)
@@ -292,8 +408,6 @@ class MainActivity : AppCompatActivity() {
             setOnCheckedChangeListener { _, enabled -> ttsEnabled = enabled }
         }
         content.addView(ttsSwitch)
-        output = label("JasSI is ready. Try “open Waterfox” or “explain this error”.", 15, Color.WHITE)
-        content.addView(output)
         scroll.addView(content)
         root.addView(scroll)
         return root
@@ -301,9 +415,27 @@ class MainActivity : AppCompatActivity() {
 
     private fun handle(text: String, isVoice: Boolean) {
         if (text.isBlank()) return
+        if (!requestInProgress.compareAndSet(false, true)) {
+            output.text = "JasSI is still processing the previous request."
+            return
+        }
         output.text = "Working..."
+        thinkingIndicator?.apply {
+            visibility = View.VISIBLE
+            alpha = 0.4f
+            animate().alpha(1f).setDuration(450).withEndAction {
+                if (requestInProgress.get()) animate().alpha(0.4f).setDuration(450).start()
+            }.start()
+        }
         worker.execute {
-            handleBlocking(text, isVoice)
+            try {
+                handleBlocking(text, isVoice)
+            } finally {
+                requestInProgress.set(false)
+                runOnUiThread {
+                    thinkingIndicator?.visibility = View.GONE
+                }
+            }
         }
     }
 
@@ -382,6 +514,80 @@ class MainActivity : AppCompatActivity() {
             return
         }
         startRecognition()
+    }
+
+    private fun ensureWhisperModel(): String? {
+        val destination = File(filesDir, "models/ggml-base-q5_1.bin")
+        if (destination.isFile && destination.length() > 50L * 1024L * 1024L) {
+            return destination.path
+        }
+        return runCatching {
+            destination.parentFile?.mkdirs()
+            assets.open("models/ggml-base-q5_1.bin").use { input ->
+                FileOutputStream(destination).use { output -> input.copyTo(output) }
+            }
+            destination.path
+        }.getOrNull()
+    }
+
+    private fun transcribeWithWhisper() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingVoiceStart = true
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        val model = whisperModelPath
+        if (model.isNullOrBlank()) {
+            output.text = "Offline Whisper model is not available."
+            return
+        }
+        if (!requestInProgress.compareAndSet(false, true)) {
+            output.text = "JasSI is still processing the previous request."
+            return
+        }
+        output.text = "Listening offline for 6 seconds..."
+        worker.execute {
+            val result = runCatching {
+                val sampleRate = 16_000
+                val minBuffer = AudioRecord.getMinBufferSize(
+                    sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+                )
+                require(minBuffer > 0) { "This phone cannot open a microphone recorder." }
+                val recorder = AudioRecord(
+                    MediaRecorder.AudioSource.MIC,
+                    sampleRate,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    maxOf(minBuffer, sampleRate)
+                )
+                val pcm = ShortArray(sampleRate * 6)
+                recorder.startRecording()
+                var offset = 0
+                while (offset < pcm.size) {
+                    val read = recorder.read(pcm, offset, pcm.size - offset)
+                    if (read <= 0) break
+                    offset += read
+                }
+                recorder.stop()
+                recorder.release()
+                require(offset > sampleRate / 4) { "No microphone audio was captured." }
+                val samples = FloatArray(offset) { index -> pcm[index] / 32768.0f }
+                NativeBridge.transcribe(model, samples).trim()
+            }.getOrElse { "Offline speech recognition failed: ${it.message ?: "unknown error"}" }
+            runOnUiThread {
+                requestInProgress.set(false)
+                if (result.isBlank()) {
+                    output.text = "Whisper did not detect speech."
+                } else {
+                    output.text = "Whisper: $result"
+                    handle(result, true)
+                }
+            }
+        }
     }
 
     private fun startRecognition() {

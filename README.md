@@ -44,6 +44,24 @@ official llama.cpp Android C++ backend, built for arm64-v8a and x86_64.
 The C++ bridge is the integration point for a production llama.cpp/Qualcomm
 backend.
 
+The native build enables llama.cpp's upstream Hexagon backend when the build
+machine has Qualcomm's Hexagon SDK available through `HEXAGON_SDK_ROOT`. The
+SDK and HTP libraries are Qualcomm components and are not bundled in this
+repository. A Hexagon-enabled build must ship the generated, signed HTP
+libraries required by the target Snapdragon device; otherwise the app reports
+the available native backend and safely uses the CPU fallback. The integration
+uses the upstream llama.cpp Hexagon implementation rather than copied
+Qualcomm source:
+https://github.com/ggml-org/llama.cpp/tree/master/ggml/src/ggml-hexagon
+
+The T2 settings now normalize either a host root or a pasted `/api`/`/v1`
+URL, test LAN reachability, and list models from Ollama `/api/tags` or LM
+Studio `/v1/models`. Use the computer's LAN IP, never `localhost` from the
+phone. The T3 settings can validate OpenAI and Google credentials through
+their model-list endpoints; Anthropic does not provide a no-cost key-check
+endpoint, so JasSI reports that limitation instead of making a paid test
+request.
+
 If “open Waterfox” does not launch anything, use the exact installed app label
 and make sure JasSI is not in dry-run mode. T0 does not require accessibility
 or model permissions for opening apps and Settings; those permissions are only

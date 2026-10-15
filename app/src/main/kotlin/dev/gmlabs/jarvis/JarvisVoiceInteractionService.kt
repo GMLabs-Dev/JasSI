@@ -22,17 +22,22 @@ class JarvisVoiceInteractionSessionService : VoiceInteractionSessionService() {
 
 class JarvisVoiceInteractionSession(context: android.content.Context) :
     VoiceInteractionSession(context) {
+    override fun onShow(args: Bundle?, showFlags: Int) {
+        super.onShow(args, showFlags)
+        startVoiceActivity()
+    }
+
     override fun onHandleAssist(
         data: Bundle?,
         structure: AssistStructure?,
         content: AssistContent?
     ) {
         super.onHandleAssist(data, structure, content)
-        startVoiceActivity()
     }
 
     private fun startVoiceActivity() {
         val intent = Intent(getContext(), MainActivity::class.java)
+            .putExtra(MainActivity.EXTRA_ASSISTANT_OVERLAY, true)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         context.startActivity(intent)
     }
