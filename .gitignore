@@ -1,0 +1,8 @@
+.gradle/
+build/
+app/build/
+app/.cxx/
+local.properties
+gateway/__pycache__/
+gateway/.pytest_cache/
+*.py[cod]

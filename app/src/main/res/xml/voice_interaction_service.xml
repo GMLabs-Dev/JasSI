@@ -1,0 +1,5 @@
+<voice-interaction-service
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="dev.gmlabs.jarvis.JarvisVoiceInteractionSessionService"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="true" />
