@@ -8,10 +8,10 @@ object NativeBridge {
         runCatching { System.loadLibrary("jarvis_native") }
     }
 
-    private external fun backendName(): String
+    private external fun backendName(nativeLibraryDir: String): String
 
-    fun backendDescription(): String =
-        runCatching { backendName() }.getOrElse { "CPU fallback (native backend unavailable)" }
+    fun backendDescription(nativeLibraryDir: String = ""): String =
+        runCatching { backendName(nativeLibraryDir) }.getOrElse { "CPU fallback (native backend unavailable)" }
 
     fun generate(modelPath: String, prompt: String): String? {
         if (modelPath.endsWith(".safetensors", true)) {

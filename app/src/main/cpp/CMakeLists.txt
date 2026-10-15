@@ -39,6 +39,23 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(llama)
 
+# Qualcomm SDK 6.6's generated HTP project asks for CMake 3.22.2, while the
+# Android SDK commonly ships 3.22.1. The project uses no APIs newer than the
+# installed CMake, so relax only the generated subproject's minimum version.
+if (GGML_HEXAGON)
+    set(HEXAGON_HTP_CMAKE_LIST
+        "${llama_SOURCE_DIR}/ggml/src/ggml-hexagon/htp/CMakeLists.txt")
+    if (EXISTS "${HEXAGON_HTP_CMAKE_LIST}")
+        file(READ "${HEXAGON_HTP_CMAKE_LIST}" HEXAGON_HTP_CMAKE_CONTENT)
+        string(REPLACE
+            "cmake_minimum_required(VERSION 3.22.2)"
+            "cmake_minimum_required(VERSION 3.22.1)"
+            HEXAGON_HTP_CMAKE_CONTENT
+            "${HEXAGON_HTP_CMAKE_CONTENT}")
+        file(WRITE "${HEXAGON_HTP_CMAKE_LIST}" "${HEXAGON_HTP_CMAKE_CONTENT}")
+    endif()
+endif()
+
 set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
@@ -58,4 +75,17 @@ target_include_directories(jarvis_native PRIVATE
     ${llama_SOURCE_DIR}/ggml/include
     ${whisper_SOURCE_DIR}/include
 )
-target_link_libraries(jarvis_native PRIVATE llama whisper android log)
+target_link_libraries(jarvis_native PRIVATE llama whisper ggml-hexagon android log)
+
+if (GGML_HEXAGON AND ANDROID)
+    set(HEXAGON_JNI_LIB_DIR
+        "${CMAKE_CURRENT_LIST_DIR}/../jniLibs/${ANDROID_ABI}")
+    add_dependencies(jarvis_native htp-v81)
+    add_custom_command(
+        TARGET jarvis_native POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${HEXAGON_JNI_LIB_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_BINARY_DIR}/_deps/llama-build/ggml/src/ggml-hexagon/libggml-htp-v81.so"
+            "${HEXAGON_JNI_LIB_DIR}/libggml-htp-v81.so"
+        VERBATIM)
+endif()

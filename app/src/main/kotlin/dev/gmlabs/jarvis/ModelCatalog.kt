@@ -77,7 +77,8 @@ object ModelCatalog {
         return DeviceProfile(
             memoryGb = ramGb,
             cores = Runtime.getRuntime().availableProcessors(),
-            hasHexagon = NativeBridge.backendDescription().contains("hexagon", ignoreCase = true),
+            hasHexagon = NativeBridge.backendDescription(context.applicationInfo.nativeLibraryDir)
+                .contains("hexagon", ignoreCase = true),
             hasGpu = true
         )
     }

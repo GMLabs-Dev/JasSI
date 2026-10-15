@@ -4,13 +4,64 @@
 #include <chrono>
 #include <cstring>
 #include <string>
+#include <fstream>
 #include <unistd.h>
 #include <vector>
 #include "llama.h"
 #include "ggml-backend.h"
+#include "ggml-hexagon.h"
 #include "whisper.h"
 
 static constexpr const char * TAG = "JasSI-GGUF";
+
+static std::string native_library_directory() {
+    std::ifstream maps("/proc/self/maps");
+    std::string line;
+    while (std::getline(maps, line)) {
+        const size_t path_start = line.find('/');
+        if (path_start == std::string::npos) {
+            continue;
+        }
+        const std::string path = line.substr(path_start);
+        const size_t name_start = path.rfind('/');
+        if (name_start != std::string::npos &&
+            path.find("libjarvis_native.so", name_start + 1) != std::string::npos) {
+            return path.substr(0, name_start);
+        }
+    }
+    return {};
+}
+
+static void initialize_backends(const char * supplied_library_directory = nullptr) {
+    const std::string library_directory =
+        supplied_library_directory != nullptr && supplied_library_directory[0] != '\0'
+            ? supplied_library_directory
+            : native_library_directory();
+    if (!library_directory.empty()) {
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            TAG,
+            "Loading runtime backends from %s",
+            library_directory.c_str()
+        );
+        ggml_backend_load_all_from_path(library_directory.c_str());
+    } else {
+        __android_log_print(ANDROID_LOG_WARN, TAG, "Could not locate native library directory");
+    }
+    llama_backend_init();
+#if defined(GGML_USE_HEXAGON)
+    const ggml_backend_reg_t hexagon = ggml_backend_hexagon_reg();
+    __android_log_print(
+        ANDROID_LOG_INFO,
+        TAG,
+        "Explicit Hexagon registration: %s",
+        hexagon == nullptr ? "unavailable" : "available"
+    );
+    if (hexagon != nullptr) {
+        ggml_backend_register(hexagon);
+    }
+#endif
+}
 
 static void set_batch_tokens(
     llama_batch_ext * batch,
@@ -28,12 +79,28 @@ static void set_batch_tokens(
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_dev_gmlabs_jarvis_NativeBridge_backendName(JNIEnv* env, jobject) {
-    llama_backend_init();
+Java_dev_gmlabs_jarvis_NativeBridge_backendName(JNIEnv* env, jobject, jstring library_dir_string) {
+    const char * library_dir = library_dir_string == nullptr
+        ? nullptr
+        : env->GetStringUTFChars(library_dir_string, nullptr);
+    initialize_backends(library_dir);
+    if (library_dir != nullptr) {
+        env->ReleaseStringUTFChars(library_dir_string, library_dir);
+    }
+    __android_log_print(ANDROID_LOG_INFO, TAG, "Backend device count: %zu", ggml_backend_dev_count());
     std::string names;
     for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        const ggml_backend_dev_t device = ggml_backend_dev_get(i);
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            TAG,
+            "Backend device %zu: %s (%s)",
+            i,
+            ggml_backend_dev_name(device),
+            ggml_backend_dev_description(device)
+        );
         if (!names.empty()) names += ", ";
-        names += ggml_backend_dev_name(ggml_backend_dev_get(i));
+        names += ggml_backend_dev_name(device);
     }
     return env->NewStringUTF(names.empty() ? "CPU fallback" : names.c_str());
 }
@@ -44,7 +111,7 @@ Java_dev_gmlabs_jarvis_NativeBridge_nativeGenerate(
     const char* model_path = env->GetStringUTFChars(model_path_string, nullptr);
     const char* prompt = env->GetStringUTFChars(prompt_string, nullptr);
     __android_log_print(ANDROID_LOG_INFO, TAG, "Starting GGUF inference: %s", model_path);
-    llama_backend_init();
+    initialize_backends();
     __android_log_print(ANDROID_LOG_INFO, TAG, "Available backends: %zu", ggml_backend_dev_count());
     for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
         __android_log_print(
@@ -176,9 +243,10 @@ Java_dev_gmlabs_jarvis_NativeBridge_nativeTranscribe(
                         model_path, sample_count);
 
     whisper_context_params context_params = whisper_context_default_params();
-    context_params.use_gpu = false;
+    context_params.use_gpu = true;
     whisper_context* context = whisper_init_from_file_with_params(model_path, context_params);
     if (!context) {
+        __android_log_print(ANDROID_LOG_ERROR, TAG, "Whisper model initialization failed");
         env->ReleaseFloatArrayElements(samples_array, samples, JNI_ABORT);
         env->ReleaseStringUTFChars(model_path_string, model_path);
         return env->NewStringUTF("Could not load the Whisper model.");
@@ -199,14 +267,17 @@ Java_dev_gmlabs_jarvis_NativeBridge_nativeTranscribe(
     params.suppress_blank = true;
 
     std::string result;
+    __android_log_print(ANDROID_LOG_INFO, TAG, "Whisper decode started");
     if (whisper_full(context, params, samples, sample_count) == 0) {
         const int segments = whisper_full_n_segments(context);
         for (int i = 0; i < segments; ++i) {
             result += whisper_full_get_segment_text(context, i);
         }
     } else {
+        __android_log_print(ANDROID_LOG_ERROR, TAG, "Whisper decode failed");
         result = "Whisper transcription failed.";
     }
+    __android_log_print(ANDROID_LOG_INFO, TAG, "Whisper decode finished: %zu bytes", result.size());
     whisper_free(context);
     env->ReleaseFloatArrayElements(samples_array, samples, JNI_ABORT);
     env->ReleaseStringUTFChars(model_path_string, model_path);

@@ -173,7 +173,7 @@ class MainActivity : AppCompatActivity() {
         content.addView(label("Choose how JasSI thinks. Faster tiers are always tried first.", 15, Color.LTGRAY))
         content.addView(space(18))
         content.addView(card("Device profile", "${device.summary}\nRecommended: ${recommendation.name}"))
-        content.addView(card("Native backend", NativeBridge.backendDescription() +
+        content.addView(card("Native backend", NativeBridge.backendDescription(applicationInfo.nativeLibraryDir) +
             "\nHexagon is used only in builds made with Qualcomm's Hexagon SDK; otherwise JasSI uses the CPU fallback."))
         output = label("JasSI is ready. Try “open Waterfox” or “explain this error”.", 15, Color.WHITE).apply {
             setPadding(dp(16), dp(14), dp(16), dp(14))
@@ -558,25 +558,39 @@ class MainActivity : AppCompatActivity() {
                 )
                 require(minBuffer > 0) { "This phone cannot open a microphone recorder." }
                 val recorder = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
                     sampleRate,
                     AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT,
                     maxOf(minBuffer, sampleRate)
                 )
-                val pcm = ShortArray(sampleRate * 6)
-                recorder.startRecording()
-                var offset = 0
-                while (offset < pcm.size) {
-                    val read = recorder.read(pcm, offset, pcm.size - offset)
-                    if (read <= 0) break
-                    offset += read
+                require(recorder.state == AudioRecord.STATE_INITIALIZED) {
+                    "The microphone recorder could not be initialized."
                 }
-                recorder.stop()
-                recorder.release()
-                require(offset > sampleRate / 4) { "No microphone audio was captured." }
-                val samples = FloatArray(offset) { index -> pcm[index] / 32768.0f }
-                NativeBridge.transcribe(model, samples).trim()
+                val pcm = ShortArray(sampleRate * 6)
+                try {
+                    recorder.startRecording()
+                    require(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                        "The microphone did not enter recording mode."
+                    }
+                    var offset = 0
+                    while (offset < pcm.size) {
+                        val read = recorder.read(pcm, offset, pcm.size - offset)
+                        if (read < 0) {
+                            throw IllegalStateException("Microphone read failed: $read")
+                        }
+                        if (read == 0) continue
+                        offset += read
+                    }
+                    require(offset > sampleRate / 4) { "No microphone audio was captured." }
+                    val samples = FloatArray(offset) { index -> pcm[index] / 32768.0f }
+                    NativeBridge.transcribe(model, samples).trim()
+                } finally {
+                    if (recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                        recorder.stop()
+                    }
+                    recorder.release()
+                }
             }.getOrElse { "Offline speech recognition failed: ${it.message ?: "unknown error"}" }
             runOnUiThread {
                 requestInProgress.set(false)
