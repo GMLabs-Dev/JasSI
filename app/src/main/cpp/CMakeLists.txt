@@ -11,24 +11,6 @@ set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
 
-# Build the Vulkan backend when the Android NDK shader compiler is available.
-# The backend is loaded dynamically at runtime, so devices without a usable
-# Vulkan driver continue to use the CPU backend.
-find_program(JARVIS_GLSLC_EXECUTABLE glslc
-    HINTS "$ENV{ANDROID_NDK}/shader-tools/linux-x86_64"
-          "$ENV{ANDROID_NDK_HOME}/shader-tools/linux-x86_64"
-          "${CMAKE_ANDROID_NDK}/shader-tools/linux-x86_64")
-if (JARVIS_GLSLC_EXECUTABLE)
-    set(GGML_VULKAN ON CACHE BOOL "" FORCE)
-    set(Vulkan_GLSLC_EXECUTABLE "${JARVIS_GLSLC_EXECUTABLE}" CACHE FILEPATH "" FORCE)
-    set(SPIRV-Headers_DIR
-        "${CMAKE_CURRENT_LIST_DIR}/cmake/packages/SPIRV-Headers"
-        CACHE PATH "" FORCE)
-    message(STATUS "JasSI: enabling optional llama.cpp Vulkan backend")
-else()
-    message(STATUS "JasSI: glslc not found; Vulkan backend disabled")
-endif()
-
 # The Hexagon backend is upstream llama.cpp code.  It is enabled only when the
 # developer provides Qualcomm's Hexagon SDK; the SDK is not redistributable.
 # See https://github.com/ggml-org/llama.cpp/tree/master/ggml/src/ggml-hexagon
@@ -56,18 +38,6 @@ FetchContent_Declare(
     GIT_TAG 47f5a64ae12833b9092c6c47b54aa9f310c4f6f1
 )
 FetchContent_MakeAvailable(llama)
-
-if (TARGET ggml-vulkan AND CMAKE_ANDROID_NDK)
-    if (IS_DIRECTORY "/home/gustaw/Qualcomm/6.6.0.0/tools/android-ndk-r25c/sources/third_party/vulkan/src/include")
-        target_include_directories(ggml-vulkan BEFORE PRIVATE
-            "/home/gustaw/Qualcomm/6.6.0.0/tools/android-ndk-r25c/sources/third_party/vulkan/src/include"
-            "${CMAKE_ANDROID_NDK}/sources/third_party/shaderc/third_party/spirv-tools/external/spirv-headers/include")
-    else()
-        target_include_directories(ggml-vulkan BEFORE PRIVATE
-            "${CMAKE_ANDROID_NDK}/sources/third_party/vulkan/src/include"
-            "${CMAKE_ANDROID_NDK}/sources/third_party/shaderc/third_party/spirv-tools/external/spirv-headers/include")
-    endif()
-endif()
 
 # Qualcomm SDK 6.6's generated HTP project asks for CMake 3.22.2, while the
 # Android SDK commonly ships 3.22.1. The project uses no APIs newer than the
@@ -107,10 +77,6 @@ target_include_directories(jarvis_native PRIVATE
 )
 target_link_libraries(jarvis_native PRIVATE llama whisper ggml-hexagon android log)
 
-if (TARGET ggml-vulkan)
-    target_link_libraries(jarvis_native PRIVATE ggml-vulkan)
-endif()
-
 if (GGML_HEXAGON AND ANDROID)
     set(HEXAGON_JNI_LIB_DIR
         "${CMAKE_CURRENT_LIST_DIR}/../jniLibs/${ANDROID_ABI}")
@@ -121,17 +87,5 @@ if (GGML_HEXAGON AND ANDROID)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_BINARY_DIR}/_deps/llama-build/ggml/src/ggml-hexagon/libggml-htp-v81.so"
             "${HEXAGON_JNI_LIB_DIR}/libggml-htp-v81.so"
-        VERBATIM)
-endif()
-
-if (TARGET ggml-vulkan AND ANDROID)
-    set(VULKAN_JNI_LIB_DIR
-        "${CMAKE_CURRENT_LIST_DIR}/../jniLibs/${ANDROID_ABI}")
-    add_custom_command(
-        TARGET jarvis_native POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_JNI_LIB_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE:ggml-vulkan>"
-            "${VULKAN_JNI_LIB_DIR}/libggml-vulkan.so"
         VERBATIM)
 endif()
