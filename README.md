@@ -10,7 +10,7 @@ with deterministic Android actions and escalating only when necessary.
   </video>
 </p>
 
-> Add the demonstration recording at [`/.github/video.mp4`](.github/video.mp4).
+> Demonstration recording at [`/.github/video.mp4`](.github/video.mp4).
 
 ## Highlights
 
