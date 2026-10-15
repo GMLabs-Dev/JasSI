@@ -94,25 +94,9 @@ class RuleProcessor(private val androidContext: Context, private val settings: J
                     .removePrefix("the app ")
                     .removePrefix("app ")
                     .trim()
-                val aliases = mapOf(
-                    "waterfox" to "net.waterfox.android.releses",
-                    "firefox" to "org.mozilla.firefox",
-                    "chrome" to "com.android.chrome"
-                )
-                val directPackage = aliases[name]
-                val packageName = androidContext.packageManager.getInstalledApplications(0)
-                    .firstOrNull { app ->
-                        app.packageName.equals(directPackage ?: name, true) ||
-                            androidContext.packageManager.getApplicationLabel(app).toString().equals(name, true)
-                    }?.packageName
-                    ?: directPackage?.takeIf {
-                        androidContext.packageManager.getLaunchIntentForPackage(it) != null
-                    }
-                packageName?.let {
-                    androidContext.packageManager.getLaunchIntentForPackage(it)?.let { launch ->
-                        androidContext.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    } ?: return "I could not launch $name."
-                } ?: return "I could not find an installed app named $name."
+                val aliases = mapOf("waterfox" to "net.waterfox.android.releses")
+                val target = aliases[name] ?: name
+                return AppResolver(androidContext).launch(target)
             }
 
             "flashlight" -> {
@@ -141,7 +125,7 @@ class RuleProcessor(private val androidContext: Context, private val settings: J
                 }
                 object : CountDownTimer(amount * multiplier, amount * multiplier) {
                     override fun onTick(millisUntilFinished: Long) = Unit
-                    override fun onFinish() = Toast.makeText(androidContext, "Jarvis timer finished", Toast.LENGTH_LONG).show()
+                    override fun onFinish() = Toast.makeText(androidContext, "JasSI timer finished", Toast.LENGTH_LONG).show()
                 }.start()
                 return "Timer set for $amount ${timer?.groupValues?.get(2) ?: "minutes"}."
             }

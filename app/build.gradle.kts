@@ -18,6 +18,10 @@ android {
             cmake {
                 cppFlags += "-std=c++20"
             }
+        }
+
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
 
             compileOptions {
                 sourceCompatibility = JavaVersion.VERSION_17

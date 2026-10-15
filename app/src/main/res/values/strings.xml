@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">Jarvis</string>
-    <string name="accessibility_description">Jarvis dry-run action executor</string>
+    <string name="app_name">JasSI</string>
+    <string name="accessibility_description">JasSI dry-run action executor</string>
 </resources>

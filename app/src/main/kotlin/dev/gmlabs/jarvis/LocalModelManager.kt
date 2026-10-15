@@ -36,7 +36,7 @@ class LocalModelManager(private val context: Context) {
             ?: "https://huggingface.co/${model.id}/resolve/main/model.gguf"
         val request = DownloadManager.Request(Uri.parse(url))
             .setTitle("Downloading ${model.name}")
-            .setDescription("Jarvis local model")
+            .setDescription("JasSI local model")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setDestinationInExternalFilesDir(
                 context,

@@ -51,7 +51,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val model = LocalModelManager(this).importModel(uri, "jarvis-model.gguf")
                 prefs.importedModelPath = model.path
-                output.text = "Imported local model:\n${model.name}\nJarvis will use it for T1."
+                output.text = "Imported local model:\n${model.name}\nJasSI will use it for T1."
             } catch (error: Exception) {
                 output.text = "Could not import model: ${error.message}"
             }
@@ -83,14 +83,14 @@ class MainActivity : AppCompatActivity() {
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
-        content.addView(label("JARVIS", 13, Color.rgb(113, 191, 255)))
+        content.addView(label("JasSI", 13, Color.rgb(113, 191, 255)))
         content.addView(label("Your private Android assistant", 28, Color.WHITE))
-        content.addView(label("Choose how Jarvis thinks. Faster tiers are always tried first.", 15, Color.LTGRAY))
+        content.addView(label("Choose how JasSI thinks. Faster tiers are always tried first.", 15, Color.LTGRAY))
         content.addView(space(18))
         content.addView(card("Device profile", "${device.summary}\nRecommended: ${recommendation.name}"))
 
         content.addView(label("On-device model · T1", 19, Color.WHITE))
-        content.addView(label("Select a Hugging Face model. Jarvis recommends a size your phone can run comfortably.", 14, Color.LTGRAY))
+        content.addView(label("Select a Hugging Face model. JasSI recommends a size your phone can run comfortably.", 14, Color.LTGRAY))
         val modelSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(
                 this@MainActivity,
@@ -126,7 +126,7 @@ class MainActivity : AppCompatActivity() {
         })
         content.addView(label(
             if (prefs.importedModelPath.isBlank()) {
-                "No local model file loaded. Download a compatible GGUF file from Hugging Face, then select it here."
+                "No local model file loaded. Select a compatible GGUF file from Hugging Face."
             } else {
                 "Loaded local model: ${prefs.importedModelPath.substringAfterLast('/')}"
             },
@@ -185,7 +185,7 @@ class MainActivity : AppCompatActivity() {
         }
         content.addView(privacySwitch)
         content.addView(dryRunSwitch)
-        content.addView(button("Make Jarvis my default assistant") { requestAssistantRole() })
+        content.addView(button("Make JasSI my default assistant") { requestAssistantRole() })
         content.addView(button("Open Android default-assistant settings") {
             startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
         })
@@ -194,13 +194,13 @@ class MainActivity : AppCompatActivity() {
         })
         content.addView(label(
             "Android does not grant accessibility or default-assistant access through a popup. " +
-                "Use the buttons above, select Jarvis in system settings, then return here.",
+                "Use the buttons above, select JasSI in system settings, then return here.",
             13,
             Color.LTGRAY
         ))
 
         val input = EditText(this).apply {
-            hint = "Ask Jarvis anything..."
+            hint = "Ask JasSI anything..."
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
         }
@@ -221,7 +221,7 @@ class MainActivity : AppCompatActivity() {
             setOnCheckedChangeListener { _, enabled -> ttsEnabled = enabled }
         }
         content.addView(ttsSwitch)
-        output = label("Jarvis is ready. Try “open Firefox” or “explain this error”.", 15, Color.WHITE)
+        output = label("JasSI is ready. Try “open Waterfox” or “explain this error”.", 15, Color.WHITE)
         content.addView(output)
         scroll.addView(content)
         root.addView(scroll)
@@ -290,7 +290,7 @@ class MainActivity : AppCompatActivity() {
             }
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask Jarvis")
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask JasSI")
             }
             speechRecognizer?.setRecognitionListener(object : android.speech.RecognitionListener {
                 override fun onResults(results: Bundle?) {
@@ -317,10 +317,10 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     assistantRole.launch(roles.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
                 } else if (roles.isRoleHeld(RoleManager.ROLE_ASSISTANT)) {
-                    output.text = "Jarvis is already your default assistant."
+                    output.text = "JasSI is already your default assistant."
                 } else {
                     output.text = "This Android build does not expose the assistant role. " +
-                        "Open Android default-assistant settings and check whether Jarvis is listed."
+                        "Open Android default-assistant settings and check whether JasSI is listed."
                 }
         } else {
             startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
