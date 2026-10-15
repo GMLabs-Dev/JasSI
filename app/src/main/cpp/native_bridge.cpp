@@ -56,7 +56,7 @@ Java_dev_gmlabs_jarvis_NativeBridge_nativeGenerate(
 
     auto context_params = llama_context_default_params();
     context_params.n_ctx = prompt_size + 128;
-    context_params.n_batch = prompt_size;
+    context_params.n_batch = std::max(prompt_size, 1);
     context_params.n_threads = 4;
     context_params.n_threads_batch = 4;
     llama_context* context = llama_init_from_model(model, context_params);
@@ -86,7 +86,7 @@ Java_dev_gmlabs_jarvis_NativeBridge_nativeGenerate(
         const int piece_size = llama_token_to_piece(vocab, token, piece, sizeof(piece), 0, true);
         if (piece_size > 0) result.append(piece, piece_size);
         ++position;
-        set_batch_tokens(batch, &token, 1, prompt_size + position);
+        set_batch_tokens(batch, &token, 1, prompt_size + position - 1);
     }
 
     llama_batch_ext_free(batch);

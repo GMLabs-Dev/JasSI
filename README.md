@@ -6,17 +6,22 @@ processing router:
 - **T0**: Android rules and APIs for deterministic actions.
 - **T1**: a local model through the NPU/CPU/GPU bridge.
 - **T2**: an Ollama or LM Studio endpoint on the home network.
-- **T3**: a guarded FastAPI gateway for cloud models.
+- **T3**: direct optional OpenAI, Google Gemini, or Anthropic Claude calls from
+  the Android app.
 
 The implementation includes the Android shell, a model-selection UI
 with device-aware Hugging Face recommendations, model downloads, local/native
-inference seam, real Android speech recognition and TTS, default-assistant
-integration, a typed four-tier router, privacy and dry-run controls, working
-Ollama requests, a native C++ bridge seam, and provider adapters for OpenAI,
-Google Gemini, and Claude in the gateway.
+inference seam, Android speech recognition and TTS, default-assistant
+integration, a typed four-tier router, privacy and dry-run controls, direct
+Ollama and LM Studio requests, a native C++ bridge, and editable cloud API
+credentials. Network and model work runs off the Android UI thread.
 
-T2 and T3 are optional: T2 is enabled by entering an Ollama or LM Studio
-endpoint, while T3 is enabled explicitly and remains blocked by Privacy mode.
+T2 and T3 are optional: T2 is enabled by selecting Ollama or LM Studio,
+entering the computer's LAN endpoint and model name, while T3 is enabled
+explicitly and remains blocked by Privacy mode. Ollama uses its native
+`/api/chat` endpoint; LM Studio uses its OpenAI-compatible
+`/v1/chat/completions` endpoint. For LAN access, configure the desktop
+provider to listen on the network and allow the port through its firewall.
 Select **Make JasSI my default assistant** in the app to request Android's
 assistant role. Microphone and camera access are requested when needed. Accessibility and the
 default-assistant role are special Android settings, not runtime permissions:
@@ -44,16 +49,7 @@ and make sure JasSI is not in dry-run mode. T0 does not require accessibility
 or model permissions for opening apps and Settings; those permissions are only
 needed for future UI automation and assistant invocation.
 
-## Gateway
-
-```bash
-cd gateway
-python -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app:app --reload
-```
-
-Set `JARVIS_GATEWAY_TOKEN` plus `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or
-`ANTHROPIC_API_KEY` before enabling T3. The gateway is deliberately the only
-component that should hold cloud credentials.
+The `gateway/` directory is retained as an optional development/test adapter,
+but the Android app does not depend on it and does not send requests through
+it. Cloud keys are entered in JasSI's settings and stored in the app's private
+preferences; use Privacy mode to block all cloud calls.

@@ -17,6 +17,14 @@ class JarvisPreferences(context: Context) {
         get() = values.getString("t2_endpoint", "")!!
         set(value) = values.edit().putString("t2_endpoint", value).apply()
 
+    var t2Provider: String
+        get() = values.getString("t2_provider", "Ollama")!!
+        set(value) = values.edit().putString("t2_provider", value).apply()
+
+    var t2ApiKey: String
+        get() = values.getString("t2_api_key", "")!!
+        set(value) = values.edit().putString("t2_api_key", value).apply()
+
     var t3Provider: String
         get() = values.getString("t3_provider", "OpenAI")!!
         set(value) = values.edit().putString("t3_provider", value).apply()
@@ -42,6 +50,18 @@ class JarvisPreferences(context: Context) {
         set(value) = values.edit().putString("t3_model", value).apply()
 
     var t3BaseUrl: String
-        get() = values.getString("t3_base_url", "http://10.0.2.2:8000")!!
+        get() = values.getString("t3_base_url", "")!!
         set(value) = values.edit().putString("t3_base_url", value).apply()
+
+    var openAiApiKey: String
+        get() = values.getString("openai_api_key", "")!!
+        set(value) = values.edit().putString("openai_api_key", value).apply()
+
+    var googleApiKey: String
+        get() = values.getString("google_api_key", "")!!
+        set(value) = values.edit().putString("google_api_key", value).apply()
+
+    var claudeApiKey: String
+        get() = values.getString("claude_api_key", "")!!
+        set(value) = values.edit().putString("claude_api_key", value).apply()
 }

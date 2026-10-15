@@ -13,7 +13,7 @@ enum class Tier(val label: String, val rank: Int) {
     T0("On-device rules", 0),
     T1("On-device model", 1),
     T2("Home network model", 2),
-    T3("Cloud gateway", 3)
+    T3("Cloud provider", 3)
 }
 
 data class JarvisSettings(

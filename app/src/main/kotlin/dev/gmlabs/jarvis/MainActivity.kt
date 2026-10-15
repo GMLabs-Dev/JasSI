@@ -26,11 +26,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import java.util.Locale
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
     private lateinit var output: TextView
     private lateinit var modelSummary: TextView
     private lateinit var t2Endpoint: EditText
+    private lateinit var t2Model: EditText
+    private lateinit var t2ApiKey: EditText
+    private lateinit var t3Model: EditText
+    private lateinit var apiKey: EditText
     private lateinit var t3Switch: Switch
     private lateinit var privacySwitch: Switch
     private lateinit var dryRunSwitch: Switch
@@ -38,11 +43,20 @@ class MainActivity : AppCompatActivity() {
     private var tts: TextToSpeech? = null
     private var ttsEnabled = true
     private var speechRecognizer: SpeechRecognizer? = null
+    private val worker = Executors.newSingleThreadExecutor()
+    private var pendingVoiceStart = false
 
     private val assistantRole =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
     private val microphonePermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted && pendingVoiceStart) {
+                pendingVoiceStart = false
+                startRecognition()
+            } else if (!granted) {
+                output.text = "Microphone permission is required for voice commands."
+            }
+        }
     private val cameraPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
     private val modelFilePicker =
@@ -143,8 +157,43 @@ class MainActivity : AppCompatActivity() {
             setHintTextColor(Color.GRAY)
         }
         content.addView(t2Endpoint)
+        val t2Provider = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                listOf("Ollama", "LM Studio")
+            )
+            setSelection(listOf("Ollama", "LM Studio").indexOf(prefs.t2Provider).coerceAtLeast(0))
+            setOnItemSelectedListener(SimpleItemSelectedListener { position ->
+                prefs.t2Provider = listOf("Ollama", "LM Studio")[position]
+                t2Endpoint.hint = if (position == 0) {
+                    "http://192.168.1.20:11434"
+                } else {
+                    "http://192.168.1.20:1234"
+                }
+            })
+        }
+        content.addView(t2Provider)
+        t2Model = EditText(this).apply {
+            hint = "Model name (for example llama3.2 or loaded LM Studio ID)"
+            setText(prefs.t2Model)
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+        }
+        content.addView(t2Model)
+        t2ApiKey = EditText(this).apply {
+            hint = "Optional local-server API key"
+            setText(prefs.t2ApiKey)
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        content.addView(t2ApiKey)
         content.addView(button("Save network model") {
             prefs.t2Endpoint = t2Endpoint.text.toString().trim()
+            prefs.t2Model = t2Model.text.toString().trim()
+            prefs.t2ApiKey = t2ApiKey.text.toString()
             output.text = if (prefs.t2Endpoint.isBlank()) "T2 disabled." else "T2 enabled for ${prefs.t2Endpoint}."
         })
 
@@ -168,7 +217,29 @@ class MainActivity : AppCompatActivity() {
             })
         }
         content.addView(providerSpinner)
-        content.addView(label("Cloud is disabled while Privacy mode is on. Store API keys only in the gateway.", 13, Color.LTGRAY))
+        t3Model = EditText(this).apply {
+            hint = "Cloud model name"
+            setText(prefs.t3Model)
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+        }
+        content.addView(t3Model)
+        apiKey = EditText(this).apply {
+            hint = "API key for selected cloud provider"
+            setText(currentApiKey())
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        content.addView(apiKey)
+        content.addView(button("Save cloud settings") {
+            prefs.t3Model = t3Model.text.toString().trim()
+            saveCurrentApiKey(apiKey.text.toString())
+            output.text = "Saved ${prefs.t3Provider} settings on this device."
+        })
+        content.addView(label("Cloud calls go directly from JasSI to the selected provider. No gateway is required. " +
+            "Privacy mode blocks them.", 13, Color.LTGRAY))
 
         content.addView(space(8))
         privacySwitch = Switch(this).apply {
@@ -230,6 +301,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun handle(text: String, isVoice: Boolean) {
         if (text.isBlank()) return
+        output.text = "Working..."
+        worker.execute {
+            handleBlocking(text, isVoice)
+        }
+    }
+
+    private fun handleBlocking(text: String, isVoice: Boolean) {
         val settings = JarvisSettings(
             privacyMode = prefs.privacyMode,
             ttsEnabled = ttsEnabled,
@@ -268,36 +346,76 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        if (prefs.t2Endpoint.isNotBlank()) processors += OllamaProcessor(prefs.t2Endpoint, prefs.t2Model)
+        if (prefs.t2Endpoint.isNotBlank()) {
+            processors += OllamaProcessor(
+                prefs.t2Endpoint,
+                prefs.t2Model,
+                prefs.t2Provider,
+                prefs.t2ApiKey
+            )
+        }
         if (prefs.t3Enabled && !prefs.privacyMode) {
-            processors += GatewayProcessor(prefs.t3BaseUrl, prefs.t3Provider, prefs.t3Model, 100)
+            val key = currentApiKey()
+            if (key.isNotBlank()) {
+                processors += CloudProcessor(prefs.t3Provider, prefs.t3Model, key)
+            }
         }
         val result = try {
             JarvisRouter(settings, processors).route(RequestContext(input = text, isVoice = isVoice))
         } catch (error: Exception) {
             RouteResult("", Tier.T0, "I could not execute that: ${error.message ?: "unknown error"}")
         }
-        output.text = "[${result.tier.label}] ${result.response}\n\nLatency: ${result.latencyMs} ms · Cost: ${result.estimatedCostCents}¢"
-        if (ttsEnabled && result.response.length < 240) {
-            tts?.speak(result.response, TextToSpeech.QUEUE_FLUSH, null, result.requestId)
+        runOnUiThread {
+            output.text = "[${result.tier.label}] ${result.response}\n\nLatency: ${result.latencyMs} ms · Cost: ${result.estimatedCostCents}¢"
+            if (ttsEnabled && result.response.length < 240) {
+                tts?.speak(result.response, TextToSpeech.QUEUE_FLUSH, null, result.requestId)
+            }
         }
     }
 
     private fun listen() {
-            if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-                output.text = "Speech recognition is not available on this device."
-                return
-            }
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask JasSI")
-            }
-            speechRecognizer?.setRecognitionListener(object : android.speech.RecognitionListener {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingVoiceStart = true
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        startRecognition()
+    }
+
+    private fun startRecognition() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            output.text = "Android has no speech-recognition service enabled. Install or enable an offline/online speech service, then try again."
+            return
+        }
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask JasSI")
+        }
+        speechRecognizer?.cancel()
+        speechRecognizer?.setRecognitionListener(object : android.speech.RecognitionListener {
                 override fun onResults(results: Bundle?) {
                     results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                         ?.firstOrNull()?.let { handle(it, true) }
                 }
-                override fun onError(error: Int) { output.text = "Speech recognition failed: $error" }
+                override fun onError(error: Int) {
+                    val reason = when (error) {
+                        SpeechRecognizer.ERROR_AUDIO -> "microphone audio"
+                        SpeechRecognizer.ERROR_CLIENT -> "Android speech service"
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "microphone permission"
+                        SpeechRecognizer.ERROR_NETWORK,
+                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "network or speech service"
+                        SpeechRecognizer.ERROR_NO_MATCH -> "no speech was understood"
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "speech recognizer is busy"
+                        SpeechRecognizer.ERROR_SERVER -> "speech server"
+                        else -> "unknown speech error ($error)"
+                    }
+                    output.text = "Speech recognition failed: $reason."
+                }
                 override fun onReadyForSpeech(params: Bundle?) { output.text = "Listening..." }
                 override fun onBeginningOfSpeech() = Unit
                 override fun onRmsChanged(rmsdB: Float) = Unit
@@ -306,10 +424,25 @@ class MainActivity : AppCompatActivity() {
                 override fun onPartialResults(partialResults: Bundle?) = Unit
                 override fun onEvent(eventType: Int, params: Bundle?) = Unit
             })
-            speechRecognizer?.startListening(intent)
-        }
+        speechRecognizer?.startListening(intent)
+    }
 
-        private fun requestAssistantRole() {
+    private fun currentApiKey(): String = when (prefs.t3Provider.lowercase()) {
+        "openai" -> prefs.openAiApiKey
+        "google" -> prefs.googleApiKey
+        "claude" -> prefs.claudeApiKey
+        else -> ""
+    }
+
+    private fun saveCurrentApiKey(value: String) {
+        when (prefs.t3Provider.lowercase()) {
+            "openai" -> prefs.openAiApiKey = value
+            "google" -> prefs.googleApiKey = value
+            "claude" -> prefs.claudeApiKey = value
+        }
+    }
+
+    private fun requestAssistantRole() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val roles = getSystemService(RoleManager::class.java)
             if (roles.isRoleAvailable(RoleManager.ROLE_ASSISTANT) &&
@@ -365,6 +498,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         tts?.shutdown()
         speechRecognizer?.destroy()
+        worker.shutdownNow()
         super.onDestroy()
     }
 }

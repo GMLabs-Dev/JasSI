@@ -8,8 +8,20 @@ class AppResolver(private val context: Context) {
     fun launch(nameOrPackage: String): String {
         val query = nameOrPackage.trim()
         val packageManager = context.packageManager
-        val direct = packageManager.getLaunchIntentForPackage(query)
-        if (direct != null) return start(direct, query)
+        val aliases = if (query.replace(Regex("[^a-z0-9]"), "").equals("waterfox", true)) {
+            listOf(
+                "net.waterfox.android.releses",
+                "net.waterfox.android.releases",
+                "net.waterfox.android"
+            )
+        } else {
+            listOf(query)
+        }
+        aliases.forEach { packageName ->
+            packageManager.getLaunchIntentForPackage(packageName)?.let {
+                return start(it, "Waterfox".takeIf { query.contains("waterfox", true) } ?: packageName)
+            }
+        }
 
         val candidates = packageManager.queryIntentActivities(
             Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),
@@ -18,10 +30,11 @@ class AppResolver(private val context: Context) {
         val match = candidates.firstOrNull { info ->
             val activity = info.activityInfo
             val label = info.loadLabel(packageManager).toString()
-            activity.packageName.equals(query, ignoreCase = true) ||
+                aliases.any { activity.packageName.equals(it, ignoreCase = true) } ||
                 label.equals(query, ignoreCase = true) ||
+                    (query.contains("waterfox", true) && label.contains("waterfox", true)) ||
                 label.replace(Regex("[^a-z0-9]"), "")
-                    .equals(query.replace(Regex("[^a-z0-9]"), ""), ignoreCase = true)
+                        .contains(query.replace(Regex("[^a-z0-9]"), ""), ignoreCase = true)
         }
         return if (match == null) {
             "I could not find a launchable app named $query."
