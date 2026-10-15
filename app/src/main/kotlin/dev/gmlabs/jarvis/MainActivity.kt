@@ -109,6 +109,16 @@ class MainActivity : AppCompatActivity() {
         if (overlayMode) window.decorView.post { transcribeWithWhisper() }
     }
 
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        if (intent?.getBooleanExtra(EXTRA_ASSISTANT_OVERLAY, false) == true) {
+            overlayMode = true
+            configureAssistantWindow()
+            setContentView(buildAssistantOverlay())
+            window.decorView.post { transcribeWithWhisper() }
+        }
+    }
+
     private fun configureAssistantWindow() {
         window.setBackgroundDrawableResource(android.R.color.transparent)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
@@ -499,7 +509,7 @@ class MainActivity : AppCompatActivity() {
         }
         runOnUiThread {
             output.text = "[${result.tier.label}] ${result.response}\n\nLatency: ${result.latencyMs} ms · Cost: ${result.estimatedCostCents}¢"
-            if (ttsEnabled && result.response.length < 240) {
+            if ((ttsEnabled || isVoice) && result.response.length < 240) {
                 tts?.speak(result.response, TextToSpeech.QUEUE_FLUSH, null, result.requestId)
             }
         }
@@ -547,7 +557,7 @@ class MainActivity : AppCompatActivity() {
             output.text = "JasSI is still processing the previous request."
             return
         }
-        output.text = "Listening offline for 6 seconds..."
+        output.text = "Listening offline for 8 seconds..."
         worker.execute {
             val result = runCatching {
                 val sampleRate = 16_000
@@ -557,17 +567,27 @@ class MainActivity : AppCompatActivity() {
                     AudioFormat.ENCODING_PCM_16BIT
                 )
                 require(minBuffer > 0) { "This phone cannot open a microphone recorder." }
-                val recorder = AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                    sampleRate,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    maxOf(minBuffer, sampleRate)
-                )
+                val recorder = runCatching {
+                    AudioRecord(
+                        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                        sampleRate,
+                        AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        maxOf(minBuffer, sampleRate)
+                    )
+                }.getOrElse {
+                    AudioRecord(
+                        MediaRecorder.AudioSource.MIC,
+                        sampleRate,
+                        AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        maxOf(minBuffer, sampleRate)
+                    )
+                }
                 require(recorder.state == AudioRecord.STATE_INITIALIZED) {
                     "The microphone recorder could not be initialized."
                 }
-                val pcm = ShortArray(sampleRate * 6)
+                val pcm = ShortArray(sampleRate * 8)
                 try {
                     recorder.startRecording()
                     require(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
@@ -596,6 +616,11 @@ class MainActivity : AppCompatActivity() {
                 requestInProgress.set(false)
                 if (result.isBlank()) {
                     output.text = "Whisper did not detect speech."
+                } else if (
+                    result.startsWith("Offline speech recognition failed:") ||
+                    result.startsWith("Whisper transcription failed:")
+                ) {
+                    output.text = result
                 } else {
                     output.text = "Whisper: $result"
                     handle(result, true)
